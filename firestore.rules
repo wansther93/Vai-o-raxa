@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isDevAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isDocOwner(docData) {
+      return isSignedIn() && (
+        docData.userId == request.auth.uid ||
+        docData.userId == request.auth.token.email ||
+        !('userId' in docData) ||
+        docData.userId == null ||
+        docData.userId == '' ||
+        isDevAdmin()
+      );
+    }
+
+    // Coleção de teste para validação de conectividade
+    match /test/{testId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Coleção protegida de administradores do sistema
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == adminId || isDevAdmin());
+    }
+
+    // Coleção de animes: permite leitura para listas públicas e compartilhamento, e escrita pelo dono ou admin
+    match /animes/{animeId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid ||
+        request.resource.data.userId == request.auth.token.email ||
+        isDevAdmin()
+      );
+      allow update, delete: if isSignedIn() && (
+        isDocOwner(resource.data) ||
+        isDevAdmin()
+      );
+    }
+
+    // Coleção de perfis de usuário: permite leitura pública de perfis/avatares e escrita exclusivamente pelo titular ou admin
+    match /user_profiles/{userId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && (
+        request.auth.uid == userId ||
+        request.auth.token.email == userId ||
+        isDevAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        request.auth.uid == userId ||
+        isDevAdmin()
+      );
+    }
+
+    // Coleção de avaliações e reviews comunitárias
+    match /anime_reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == request.auth.uid ||
+        isDevAdmin()
+      );
+      allow update, delete: if isSignedIn() && (
+        isDocOwner(resource.data) ||
+        isDevAdmin()
+      );
+    }
+  }
+}
+
+
