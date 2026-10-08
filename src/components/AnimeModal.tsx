@@ -113,6 +113,55 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
 
+  // Limpeza total de todos os campos digitados, capas pré-carregadas e buscas temporárias
+  const resetFormState = () => {
+    setTitle('');
+    setOriginalTitle('');
+    setJapaneseTitle('');
+    setCoverUrl('');
+    setCoverSourceMode('file');
+    setSynopsis('');
+    setGenres([]);
+    setStatus('watching');
+    setCurrentEpisode('1');
+    setCurrentSeasonName('Temporada 1');
+    setTotalEpisodes('');
+    setNotes('');
+    setRating(null);
+    setBroadcastDay('');
+    setStudio('');
+    setFormat('');
+    setSource('');
+    setReleaseYear('');
+    setTrailerUrl('');
+    setMalId(null);
+    setFranchiseIds([]);
+    setFranchiseTitle('');
+    setStructureMode(null);
+    setExcludedFranchiseItems([]);
+    setActiveSeasonId('');
+    setSeasons([]);
+    setShowAdvancedSeasons(false);
+    setShowOptionalDetails(false);
+    setShowCoverControls(false);
+    setOfficialCovers([]);
+    setShowCoversGallery(false);
+    setIsSearchingCovers(false);
+    setIsSearchingApi(false);
+    setIsTranslatingSynopsis(false);
+    setSearchResults([]);
+    setShowSearchResults(false);
+    setIsLoadingMetadata(false);
+    setError(null);
+  };
+
+  const handleClose = () => {
+    if (!initialData) {
+      resetFormState();
+    }
+    onClose();
+  };
+
   useEffect(() => {
     if (initialData) {
       setTitle(initialData.title);
@@ -167,42 +216,30 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
       }
       setShowOptionalDetails(false);
       setShowCoverControls(false);
+      setOfficialCovers([]);
+      setShowCoversGallery(false);
+      setIsSearchingCovers(false);
     } else {
-      // Defaults for new anime
-      setTitle('');
-      setOriginalTitle('');
-      setJapaneseTitle('');
-      setCoverUrl('');
-      setCoverSourceMode('file');
-      setSynopsis('');
-      setGenres([]);
-      setStatus('watching');
-      setCurrentEpisode('1');
-      setCurrentSeasonName('Temporada 1');
-      setTotalEpisodes('');
-      setNotes('');
-      setRating(null);
-      setBroadcastDay('');
-      setStudio('');
-      setFormat('');
-      setSource('');
-      setReleaseYear('');
-      setTrailerUrl('');
-      setMalId(null);
-      setFranchiseIds([]);
-      setFranchiseTitle('');
-      setStructureMode(null);
-      setExcludedFranchiseItems([]);
-      setActiveSeasonId('');
-      setSeasons([]);
-      setShowAdvancedSeasons(false);
-      setShowOptionalDetails(false);
-      setShowCoverControls(false);
+      // Defaults for new anime - limpeza total para evitar resíduos ao abrir novamente
+      resetFormState();
     }
     setSearchResults([]);
     setShowSearchResults(false);
     setError(null);
   }, [initialData, isOpen]);
+
+  // Fecha com tecla ESC e reseta se for novo anime
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        handleClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, initialData]);
 
   // Pré-carregamento e Sincronização Automática ao Digitar:
   // Enquanto o usuário digita (O, N, E...), o timer zera a cada tecla (ZERO requisições às APIs).
@@ -695,9 +732,13 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/90 backdrop-blur-xl overflow-y-auto animate-in fade-in duration-200">
+    <div
+      onClick={handleClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-black/90 backdrop-blur-xl overflow-y-auto animate-in fade-in duration-200"
+    >
       <div
         id="anime-form-modal-container"
+        onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl bg-[#0b0c10] border border-white/[0.08] rounded-3xl shadow-[0_25px_80px_rgba(0,0,0,0.95)] overflow-hidden my-auto max-h-[94vh] flex flex-col text-slate-100 ring-1 ring-white/[0.05]"
       >
         {/* Header Blackout Total */}
@@ -718,7 +759,8 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
 
           <button
             id="btn-close-form-modal"
-            onClick={onClose}
+            type="button"
+            onClick={handleClose}
             className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-all cursor-pointer"
             title="Fechar janela"
           >
@@ -1485,7 +1527,7 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
             <button
               type="button"
               id="btn-cancel-form-modal"
-              onClick={onClose}
+              onClick={handleClose}
               disabled={loading}
               className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-all cursor-pointer"
             >

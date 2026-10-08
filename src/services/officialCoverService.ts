@@ -68,6 +68,7 @@ export async function searchOfficialHighResCovers(
               native
             }
             format
+            popularity
             seasonYear
             startDate {
               year
@@ -99,7 +100,32 @@ export async function searchOfficialHighResCovers(
 
     if (res.ok) {
       const json = await res.json();
-      const list = json?.data?.Page?.media || [];
+      const rawList = json?.data?.Page?.media || [];
+      const qLower = cleanQuery.toLowerCase().trim();
+
+      const getCoverScore = (item: any): number => {
+        const rom = (item.title?.romaji || '').toLowerCase().trim();
+        const eng = (item.title?.english || '').toLowerCase().trim();
+        const nat = (item.title?.native || '').toLowerCase().trim();
+        const fmt = (item.format || '').toUpperCase();
+        const pop = Number(item.popularity) || 0;
+
+        let score = 0;
+        if (rom === qLower || eng === qLower || nat === qLower) score += 1000000;
+        else if (rom.startsWith(qLower) || eng.startsWith(qLower)) score += 60000;
+        else if (rom.includes(qLower) || eng.includes(qLower)) score += 25000;
+
+        if (fmt === 'TV') score += 50000;
+        else if (fmt === 'MOVIE') score += 40000;
+        else if (fmt === 'OVA' || fmt === 'ONA') score += 30000;
+        else if (fmt === 'SPECIAL') score += 10000;
+        else if (fmt === 'MUSIC') score -= 500000;
+
+        score += Math.min(pop, 500000);
+        return score;
+      };
+
+      const list = [...rawList].sort((a: any, b: any) => getCoverScore(b) - getCoverScore(a));
 
       for (const item of list) {
         const img = item.coverImage?.extraLarge || item.coverImage?.large;

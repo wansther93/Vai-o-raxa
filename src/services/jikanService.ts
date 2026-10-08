@@ -178,13 +178,39 @@ const SOURCE_MAP_PT: Record<string, string> = {
   COMIC: 'Quadrinho / Comic',
 };
 
+// Utilitário de normalização de termos de busca (permite achar obras digitando apenas partes do nome)
+function cleanSearchQueryVariants(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const variants = [trimmed];
+
+  // Variante sem pontuações especiais (hífens, dois pontos, aspas, apóstrofos)
+  const noPunct = trimmed.replace(/[:\-–—'"`!?~()[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (noPunct && noPunct !== trimmed) {
+    variants.push(noPunct);
+  }
+
+  // Se o usuário digitou sufixos genéricos de temporada no final (ex: "Danmachi Season 2", "Arifureta S3"),
+  // adiciona a raiz principal para que as APIs achem a franquia mesmo que a temporada específica tenha outro subtítulo
+  const strippedSeason = trimmed
+    .replace(/\s*(?:season|temporada|cour|part|parte)\s*\d+.*$/gi, '')
+    .replace(/\s*\d+(?:nd|rd|th|st)?\s*(?:season|cour).*$/gi, '')
+    .replace(/\s*s\d+.*$/gi, '')
+    .trim();
+  if (strippedSeason && strippedSeason.length >= 2 && !variants.includes(strippedSeason)) {
+    variants.push(strippedSeason);
+  }
+
+  return variants;
+}
+
 /**
  * 1. Provedor Primário: AniList GraphQL (Extremamente confiável e com CORS livre)
  */
 async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
   const graphqlQuery = `
     query ($search: String) {
-      Page(page: 1, perPage: 8) {
+      Page(page: 1, perPage: 20) {
         media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
           id
           idMal
@@ -200,6 +226,7 @@ async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
             medium
           }
           episodes
+          popularity
           status
           format
           source
@@ -247,23 +274,60 @@ async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
   if (!Array.isArray(rawList) || rawList.length === 0) return [];
 
   const qLower = query.toLowerCase().trim();
-  const list = [...rawList].sort((a: any, b: any) => {
-    const aRomaji = (a.title?.romaji || '').toLowerCase().trim();
-    const aEng = (a.title?.english || '').toLowerCase().trim();
-    const aExact = aRomaji === qLower || aEng === qLower ? 1 : 0;
+  const getRelevanceScore = (item: any): number => {
+    const romaji = (item.title?.romaji || '').toLowerCase().trim();
+    const english = (item.title?.english || '').toLowerCase().trim();
+    const native = (item.title?.native || '').toLowerCase().trim();
+    const format = (item.format || '').toUpperCase();
+    const popularity = Number(item.popularity) || 0;
 
-    const bRomaji = (b.title?.romaji || '').toLowerCase().trim();
-    const bEng = (b.title?.english || '').toLowerCase().trim();
-    const bExact = bRomaji === qLower || bEng === qLower ? 1 : 0;
+    let score = 0;
 
-    if (aExact !== bExact) return bExact - aExact;
+    // 1. Correspondência Exata ou por Início
+    if (romaji === qLower || english === qLower || native === qLower) {
+      score += 1000000;
+    } else if (romaji.startsWith(qLower) || english.startsWith(qLower)) {
+      score += 60000;
+    } else if (romaji.includes(qLower) || english.includes(qLower)) {
+      score += 25000;
+    } else {
+      const qWords = qLower.split(/\s+/).filter((w: string) => w.length >= 2);
+      if (qWords.length > 0 && qWords.every((w: string) => romaji.includes(w) || english.includes(w))) {
+        score += 20000;
+      }
+    }
 
-    const aStarts = aRomaji.startsWith(qLower) || aEng.startsWith(qLower) ? 1 : 0;
-    const bStarts = bRomaji.startsWith(qLower) || bEng.startsWith(qLower) ? 1 : 0;
-    if (aStarts !== bStarts) return bStarts - aStarts;
+    // 2. Hierarquia de Formato Audiovisual
+    // Séries e Filmes são o padrão principal de interesse do usuário.
+    // MUSIC são clipes e temas musicais de 2-4 min e NUNCA devem ofuscar a série do anime.
+    if (format === 'TV') {
+      score += 50000;
+    } else if (format === 'MOVIE') {
+      score += 40000;
+    } else if (format === 'OVA' || format === 'ONA') {
+      score += 30000;
+    } else if (format === 'TV_SHORT') {
+      score += 20000;
+    } else if (format === 'SPECIAL') {
+      score += 10000;
+    } else if (format === 'MUSIC') {
+      score -= 500000;
+    }
 
-    return 0;
-  });
+    // 3. Peso de Popularidade Oficial
+    score += Math.min(popularity, 500000);
+
+    // 4. Bônus para Primeira Temporada / Obra Raiz ao pesquisar o nome da franquia
+    const isLaterSeason = /(?:2nd|3rd|4th|5th|\bseason\s*[2-9]|\bpart\s*[2-9]|\bpart\s*ii)/i.test(romaji) ||
+                          /(?:2nd|3rd|4th|5th|\bseason\s*[2-9]|\bpart\s*[2-9]|\bpart\s*ii)/i.test(english);
+    if (!isLaterSeason && format === 'TV') {
+      score += 30000;
+    }
+
+    return score;
+  };
+
+  const list = [...rawList].sort((a: any, b: any) => getRelevanceScore(b) - getRelevanceScore(a));
 
   return list.map((item: any) => {
     // Calcular dia de exibição a partir do nextAiringEpisode estritamente se for anime em exibição ativa (RELEASING)
@@ -449,40 +513,45 @@ async function searchKitsu(query: string): Promise<JikanAnimeResult[]> {
 /**
  * Função principal de busca com fallback em cascata multi-provedores:
  * 1. AniList (GraphQL) -> 2. Jikan (MyAnimeList) -> 3. Shikimori API (Mirror) -> 4. Kitsu API
+ * Suporta busca por pedaços de nome, nomes alternativos e termos normalizados.
  */
 export const searchAnimeMetadata = async (query: string): Promise<JikanAnimeResult[]> => {
   if (!query || query.trim().length < 2) return [];
 
-  // 1. Tenta AniList primeiro (CORS livre e muito veloz)
-  try {
-    const results = await searchAniList(query);
-    if (results.length > 0) return results;
-  } catch (err) {
-    console.warn('AniList search failed, trying Jikan fallback...', err);
-  }
+  const queryVariants = cleanSearchQueryVariants(query);
 
-  // 2. Tenta Jikan (MyAnimeList)
-  try {
-    const results = await searchJikan(query);
-    if (results.length > 0) return results;
-  } catch (err) {
-    console.warn('Jikan search failed, trying Shikimori fallback...', err);
-  }
+  for (const q of queryVariants) {
+    // 1. Tenta AniList primeiro (CORS livre e muito veloz)
+    try {
+      const results = await searchAniList(q);
+      if (results.length > 0) return results;
+    } catch (err) {
+      console.warn('AniList search failed, trying Jikan fallback...', err);
+    }
 
-  // 3. Tenta Shikimori (Mirror de alta disponibilidade)
-  try {
-    const results = await searchShikimori(query);
-    if (results.length > 0) return results;
-  } catch (err) {
-    console.warn('Shikimori search failed, trying Kitsu fallback...', err);
-  }
+    // 2. Tenta Jikan (MyAnimeList)
+    try {
+      const results = await searchJikan(q);
+      if (results.length > 0) return results;
+    } catch (err) {
+      console.warn('Jikan search failed, trying Shikimori fallback...', err);
+    }
 
-  // 4. Tenta Kitsu (Fallback final)
-  try {
-    const results = await searchKitsu(query);
-    if (results.length > 0) return results;
-  } catch (err) {
-    console.warn('Kitsu search failed...', err);
+    // 3. Tenta Shikimori (Mirror de alta disponibilidade)
+    try {
+      const results = await searchShikimori(q);
+      if (results.length > 0) return results;
+    } catch (err) {
+      console.warn('Shikimori search failed, trying Kitsu fallback...', err);
+    }
+
+    // 4. Tenta Kitsu (Fallback final)
+    try {
+      const results = await searchKitsu(q);
+      if (results.length > 0) return results;
+    } catch (err) {
+      console.warn('Kitsu search failed...', err);
+    }
   }
 
   return [];

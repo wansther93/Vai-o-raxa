@@ -15,7 +15,6 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
-  CheckCircle2,
   Bell,
   Info,
   Award,
@@ -439,32 +438,38 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
           {/* Sombra de transição suave apenas na borda inferior do banner para fundir sem linha visível */}
           <div className="absolute inset-x-0 bottom-0 h-8 sm:h-10 bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-10" />
 
-          {/* Botões do topo (Compartilhar e Fechar) */}
-          <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
+          {/* Botões do topo (Compartilhar e Fechar) - Prioridade máxima de clique z-30 */}
+          <div className="absolute top-3 right-3 flex items-center gap-2 z-30 pointer-events-auto">
             <button
               id="schedule-modal-share-btn"
               type="button"
-              onClick={handleShare}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleShare();
+              }}
               title="Copiar link"
-              className="p-2 rounded-xl bg-black/60 hover:bg-black/80 border border-white/10 text-zinc-300 hover:text-white transition-all backdrop-blur-md cursor-pointer"
+              className="p-2 sm:p-2.5 rounded-xl bg-black/70 hover:bg-black/90 active:scale-95 border border-white/20 text-zinc-300 hover:text-white transition-all backdrop-blur-md cursor-pointer shadow-lg"
             >
               {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Share2 className="w-4 h-4" />}
             </button>
             <button
               id="schedule-modal-close-btn"
               type="button"
-              onClick={onClose}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
               title="Fechar"
-              className="p-2 rounded-xl bg-black/60 hover:bg-rose-500/20 hover:border-rose-500/30 border border-white/10 text-zinc-300 hover:text-white transition-all backdrop-blur-md cursor-pointer"
+              className="p-2 sm:p-2.5 rounded-xl bg-black/70 hover:bg-rose-500/30 hover:border-rose-500/40 active:scale-95 border border-white/20 text-zinc-300 hover:text-white transition-all backdrop-blur-md cursor-pointer shadow-lg"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Informações centrais integradas ao Banner */}
-          <div className="absolute bottom-3 sm:bottom-4 left-4 right-4 flex items-end gap-3.5 sm:gap-4 z-20">
+          <div className="absolute bottom-3 sm:bottom-4 left-4 right-16 sm:right-20 flex items-end gap-3.5 sm:gap-4 z-20 pointer-events-none">
             {/* Pôster Vertical com cantos preservados e sombra de transição suave na base */}
-            <div className="relative w-22 sm:w-28 md:w-32 aspect-[3/4] rounded-xl overflow-hidden shadow-2xl shadow-black/90 border border-white/20 bg-zinc-900 flex-shrink-0">
+            <div className="relative w-22 sm:w-28 md:w-32 aspect-[3/4] rounded-xl overflow-hidden shadow-2xl shadow-black/90 border border-white/20 bg-zinc-900 flex-shrink-0 pointer-events-auto">
               <img
                 src={anime.coverUrl}
                 alt={anime.title}
@@ -495,22 +500,10 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
                     {anime.studio}
                   </span>
                 )}
-                {existingUserAnime && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs">
-                    <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
-                    <span>Na sua lista{existingUserAnime.title.toLowerCase() !== anime.title.toLowerCase() ? `: ${existingUserAnime.title}` : ''}</span>
-                  </span>
-                )}
               </div>
               <h2 className="text-base sm:text-xl md:text-2xl font-black text-white leading-tight line-clamp-2 drop-shadow-md">
                 {anime.title}
               </h2>
-              {existingUserAnime && existingUserAnime.title.toLowerCase() !== anime.title.toLowerCase() && (
-                <div className="mt-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-amber-300/95 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 w-fit">
-                  <span className="text-amber-400 font-bold">Salvo na sua lista:</span>
-                  <span className="text-white font-extrabold">{existingUserAnime.title}</span>
-                </div>
-              )}
               {anime.title_japanese && (
                 <p className="text-xs text-zinc-400 truncate mt-0.5 font-sans opacity-80">
                   {anime.title_japanese}

@@ -179,7 +179,7 @@ export async function fetchAnimeFranchiseTree(
     try {
       const candidates = await searchAnimeMetadata(resolvedSearchTitle.trim());
       if (candidates && candidates.length > 0) {
-        const top = candidates[0];
+        const top = candidates.find((c) => c.format !== 'Música' && c.format !== 'Music') || candidates[0];
         if (top.mal_id) {
           resolvedMalId = top.mal_id;
         }
@@ -942,21 +942,23 @@ export async function fetchAnimeFranchiseTree(
           });
         };
 
-        // Candidatos de franquia identificados se a busca retornou obras distintas
-        const candidateFranchises: FranchiseCandidate[] = rawClusters.map((c) => {
-          const formattedItems = formatClusterItems(c.nodes, c.representative.title);
-          const cIds = c.nodes.map((n) => n.id);
-          return {
-            clusterId: c.representative.id,
-            title: c.representative.title,
-            year: c.representative.seasonYear || c.representative.startDate?.year || null,
-            format: c.representative.format,
-            coverUrl: c.representative.coverUrl,
-            itemCount: formattedItems.length,
-            items: formattedItems,
-            franchiseIds: cIds,
-          };
-        });
+        // Candidatos de franquia identificados se a busca retornou obras distintas (apenas clusters com pelo menos 1 mídia audiovisual válida)
+        const candidateFranchises: FranchiseCandidate[] = rawClusters
+          .map((c) => {
+            const formattedItems = formatClusterItems(c.nodes, c.representative.title);
+            const cIds = c.nodes.map((n) => n.id);
+            return {
+              clusterId: c.representative.id,
+              title: c.representative.title,
+              year: c.representative.seasonYear || c.representative.startDate?.year || null,
+              format: c.representative.format,
+              coverUrl: c.representative.coverUrl,
+              itemCount: formattedItems.length,
+              items: formattedItems,
+              franchiseIds: cIds,
+            };
+          })
+          .filter((cand) => cand.itemCount > 0);
 
         // Se houver mais de 1 cluster distinto (ex: busca por nome comum como "Another" que retornou múltiplos animes não relacionados),
         // expõe os candidatos para desambiguação e seleciona a franquia primária por padrão.
