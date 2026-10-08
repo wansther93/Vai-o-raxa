@@ -427,11 +427,16 @@ export interface ReconciledScheduleResult {
  * - Não toca nos dados de rastreamento pessoal do usuário (minha lista).
  */
 export function reconcileScheduleLifecycle(
-  weeklyList: ScheduleAnimeItem[],
-  upcomingList: ScheduleAnimeItem[],
+  weeklyList: ScheduleAnimeItem[] = [],
+  upcomingList: ScheduleAnimeItem[] = [],
   seasonNowList: ScheduleAnimeItem[] = [],
   userAnimes: Anime[] = []
 ): ReconciledScheduleResult {
+  const safeWeekly = Array.isArray(weeklyList) ? weeklyList : [];
+  const safeUpcoming = Array.isArray(upcomingList) ? upcomingList : [];
+  const safeSeasonNow = Array.isArray(seasonNowList) ? seasonNowList : [];
+  const safeUserAnimes = Array.isArray(userAnimes) ? userAnimes : [];
+
   const activeWeeklyMap = new Map<number, ScheduleAnimeItem>();
   const activeSeasonNowMap = new Map<number, ScheduleAnimeItem>();
   const upcomingMap = new Map<number, ScheduleAnimeItem>();
@@ -439,7 +444,7 @@ export function reconcileScheduleLifecycle(
   // Conjunto de IDs da lista pessoal do usuário para permitir exceção de animes que ele adicionou
   const userAnimeIds = new Set<number>();
   const userAnimeTitles = new Set<string>();
-  for (const ua of userAnimes) {
+  for (const ua of safeUserAnimes) {
     if (ua.mal_id) userAnimeIds.add(Number(ua.mal_id));
     if (Array.isArray(ua.franchiseIds)) {
       ua.franchiseIds.forEach((id) => userAnimeIds.add(Number(id)));
@@ -490,7 +495,7 @@ export function reconcileScheduleLifecycle(
   };
 
   // 1. Processa os itens semanais atuais: remove quem encerrou temporada ou entrou em hiato
-  for (const item of weeklyList) {
+  for (const item of safeWeekly) {
     if (!isAllowedOrigin(item)) continue;
 
     // Se está em hiato de transmissão (>14 dias, ex: One Piece):
@@ -520,7 +525,7 @@ export function reconcileScheduleLifecycle(
   }
 
   // 2. Processa os itens da temporada atual (Em Exibição): remove quem encerrou temporada ou entrou em hiato
-  for (const item of seasonNowList) {
+  for (const item of safeSeasonNow) {
     if (!isAllowedOrigin(item)) continue;
 
     if (isAnimeInWeeklyHiatus(item)) {
@@ -549,7 +554,7 @@ export function reconcileScheduleLifecycle(
   }
 
   // 3. Processa os itens de Próxima Temporada (upcomingList):
-  for (const item of upcomingList) {
+  for (const item of safeUpcoming) {
     if (!isAllowedOrigin(item)) continue;
 
     // Se já começou a ser transmitido e NÃO está em hiato (>14 dias):

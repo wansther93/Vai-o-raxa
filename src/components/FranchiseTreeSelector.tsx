@@ -133,13 +133,12 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
       return rel === 'main' || rel === 'sequel' || rel === 'prequel' || rel === 'parent' || !rel;
     }
 
-    // ONAs (streaming oficial como JoJo Stone Ocean, Cyberpunk, etc.):
-    // Só pertencem a Séries & Temporadas se forem séries seriadas com mais de 1 episódio E forem a série principal ou continuação
+    // ONAs (streaming oficial como JoJo Stone Ocean, Cyberpunk, Donghuas etc.):
+    // Só pertencem a Séries & Temporadas se forem séries seriadas (mais de 1 ep ou em produção/anúncio) E forem canônicas
     if (format === 'ONA') {
-      const epCount = typeof it.episodes === 'number' ? it.episodes : 0;
-      const isMultiEpisode = epCount > 1;
+      const isSingleEpisodeSpecial = it.episodes === 1;
       const isCanonRel = rel === 'main' || rel === 'sequel' || rel === 'prequel' || rel === 'parent';
-      return isMultiEpisode && isCanonRel;
+      return !isSingleEpisodeSpecial && isCanonRel;
     }
 
     return false;
