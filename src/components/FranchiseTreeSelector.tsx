@@ -128,9 +128,18 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
       return false;
     }
 
-    // Séries de TV e ONAs (streaming oficial como JoJo Stone Ocean) que sejam a série principal ou continuações canônicas
-    if (format === 'TV' || format === 'ONA') {
+    // Séries de TV tradicionais que sejam série principal ou continuação
+    if (format === 'TV') {
       return rel === 'main' || rel === 'sequel' || rel === 'prequel' || rel === 'parent' || !rel;
+    }
+
+    // ONAs (streaming oficial como JoJo Stone Ocean, Cyberpunk, etc.):
+    // Só pertencem a Séries & Temporadas se forem séries seriadas com mais de 1 episódio E forem a série principal ou continuação
+    if (format === 'ONA') {
+      const epCount = typeof it.episodes === 'number' ? it.episodes : 0;
+      const isMultiEpisode = epCount > 1;
+      const isCanonRel = rel === 'main' || rel === 'sequel' || rel === 'prequel' || rel === 'parent';
+      return isMultiEpisode && isCanonRel;
     }
 
     return false;

@@ -183,7 +183,7 @@ export async function fetchAnimeFranchiseTree(
         if (top.mal_id) {
           resolvedMalId = top.mal_id;
         }
-        if (top.title && !exactTitle) {
+        if (top.title) {
           resolvedSearchTitle = top.title;
         }
       }
@@ -192,8 +192,8 @@ export async function fetchAnimeFranchiseTree(
     }
   }
 
-  const rawSearch = resolvedSearchTitle;
-  const rootTitle = getFranchiseRootTitle(rawSearch);
+  const rawSearch = exactTitle || resolvedSearchTitle;
+  const rootTitle = getFranchiseRootTitle(resolvedSearchTitle) || getFranchiseRootTitle(rawSearch);
   const arcs = getPredefinedArcs(rawSearch);
 
   const rootKeywords = rootTitle
@@ -202,68 +202,13 @@ export async function fetchAnimeFranchiseTree(
 
   try {
     const isId = resolvedMalId !== null;
-    
-    // Consulta GraphQL combinada: Busca o Nó Principal com Relações E a Página Completa da Franquia
-    const combinedGraphqlQuery = `
-      query ($idMal: Int, $search: String, $rootSearch: String) {
-        targetMedia: Media(idMal: $idMal, search: $search, type: ANIME) {
-          id
-          idMal
-          title {
-            romaji
-            english
-            native
-          }
-          status
-          nextAiringEpisode {
-            airingAt
-          }
-          format
-          episodes
-          seasonYear
-          startDate {
-            year
-            month
-            day
-          }
-          coverImage {
-            large
-            medium
-          }
-          relations {
-            edges {
-              relationType
-              node {
-                id
-                idMal
-                title {
-                  romaji
-                  english
-                  native
-                }
-                status
-                nextAiringEpisode {
-                  airingAt
-                }
-                format
-                episodes
-                seasonYear
-                startDate {
-                  year
-                  month
-                  day
-                }
-                coverImage {
-                  large
-                  medium
-                }
-              }
-            }
-          }
-        }
 
-        franchiseSearch: Page(page: 1, perPage: 35) {
-          media(search: $rootSearch, type: ANIME, sort: [START_DATE, POPULARITY_DESC]) {
+    // Consulta GraphQL combinada limpa: Se tiver ID busca por idMal; se for texto busca estritamente por search
+    // NUNCA declara nem envia $idMal: null para evitar que a AniList filtre por animes com ID nulo
+    const combinedGraphqlQuery = isId
+      ? `
+        query ($idMal: Int, $rootSearch: String) {
+          targetMedia: Media(idMal: $idMal, type: ANIME) {
             id
             idMal
             title {
@@ -318,9 +263,183 @@ export async function fetchAnimeFranchiseTree(
               }
             }
           }
+
+          franchiseSearch: Page(page: 1, perPage: 35) {
+            media(search: $rootSearch, type: ANIME, sort: [POPULARITY_DESC]) {
+              id
+              idMal
+              title {
+                romaji
+                english
+                native
+              }
+              status
+              nextAiringEpisode {
+                airingAt
+              }
+              format
+              episodes
+              seasonYear
+              startDate {
+                year
+                month
+                day
+              }
+              coverImage {
+                large
+                medium
+              }
+              relations {
+                edges {
+                  relationType
+                  node {
+                    id
+                    idMal
+                    title {
+                      romaji
+                      english
+                      native
+                    }
+                    status
+                    nextAiringEpisode {
+                      airingAt
+                    }
+                    format
+                    episodes
+                    seasonYear
+                    startDate {
+                      year
+                      month
+                      day
+                    }
+                    coverImage {
+                      large
+                      medium
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
-      }
-    `;
+      `
+      : `
+        query ($search: String, $rootSearch: String) {
+          targetMedia: Media(search: $search, type: ANIME) {
+            id
+            idMal
+            title {
+              romaji
+              english
+              native
+            }
+            status
+            nextAiringEpisode {
+              airingAt
+            }
+            format
+            episodes
+            seasonYear
+            startDate {
+              year
+              month
+              day
+            }
+            coverImage {
+              large
+              medium
+            }
+            relations {
+              edges {
+                relationType
+                node {
+                  id
+                  idMal
+                  title {
+                    romaji
+                    english
+                    native
+                  }
+                  status
+                  nextAiringEpisode {
+                    airingAt
+                  }
+                  format
+                  episodes
+                  seasonYear
+                  startDate {
+                    year
+                    month
+                    day
+                  }
+                  coverImage {
+                    large
+                    medium
+                  }
+                }
+              }
+            }
+          }
+
+          franchiseSearch: Page(page: 1, perPage: 35) {
+            media(search: $rootSearch, type: ANIME, sort: [POPULARITY_DESC]) {
+              id
+              idMal
+              title {
+                romaji
+                english
+                native
+              }
+              status
+              nextAiringEpisode {
+                airingAt
+              }
+              format
+              episodes
+              seasonYear
+              startDate {
+                year
+                month
+                day
+              }
+              coverImage {
+                large
+                medium
+              }
+              relations {
+                edges {
+                  relationType
+                  node {
+                    id
+                    idMal
+                    title {
+                      romaji
+                      english
+                      native
+                    }
+                    status
+                    nextAiringEpisode {
+                      airingAt
+                    }
+                    format
+                    episodes
+                    seasonYear
+                    startDate {
+                      year
+                      month
+                      day
+                    }
+                    coverImage {
+                      large
+                      medium
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
 
     const variables: any = {
       rootSearch: rootTitle || rawSearch,
@@ -430,7 +549,7 @@ export async function fetchAnimeFranchiseTree(
               day: node.startDate.day || null,
             } : null,
             coverUrl: node.coverImage?.large || node.coverImage?.medium,
-            relationType: relationTypeHint || 'main',
+            relationType: relationTypeHint || (isDirectRelation ? 'main' : 'sequel'),
           });
         } else if (relationTypeHint && relationTypeHint !== 'main') {
           const existing = nodesMap.get(malId);
@@ -480,10 +599,10 @@ export async function fetchAnimeFranchiseTree(
         }
       }
 
-      // 2. Processa os nós encontrados na busca abrangente da franquia
+      // 2. Processa os nós encontrados na busca abrangente da franquia sem forçar 'main'
       franchiseList.forEach((mediaItem) => {
         if (mediaItem.id) exploredAniListIds.add(mediaItem.id);
-        processNode(mediaItem, 'main', false);
+        processNode(mediaItem, undefined, false);
         if (mediaItem.relations?.edges) {
           registerRelationEdges(mediaItem.relations.edges, mediaItem.idMal || mediaItem.id);
         }
@@ -692,15 +811,32 @@ export async function fetchAnimeFranchiseTree(
           }
 
           if (clusterNodes.length > 0) {
-            // Eleição do nó representativo do cluster
-            clusterNodes.sort((a, b) => {
-              const titleA = (a.title || '').toLowerCase().trim();
-              const titleB = (b.title || '').toLowerCase().trim();
-              const searchLower = rawSearch.toLowerCase().trim();
+            const getNodeMatchScore = (n: any, searchStr: string): number => {
+              const sLower = searchStr.toLowerCase().trim();
+              if (!sLower) return 0;
+              const rom = (n.title || '').toLowerCase().trim();
+              const eng = (n.englishTitle || '').toLowerCase().trim();
+              const nat = (n.japaneseTitle || '').toLowerCase().trim();
 
-              const exactA = titleA === searchLower ? 2 : titleA.startsWith(searchLower) ? 1 : 0;
-              const exactB = titleB === searchLower ? 2 : titleB.startsWith(searchLower) ? 1 : 0;
-              if (exactA !== exactB) return exactB - exactA;
+              if (rom === sLower || eng === sLower || nat === sLower) return 5;
+              if (rom.startsWith(sLower) || eng.startsWith(sLower)) return 4;
+              if (rom.includes(sLower) || eng.includes(sLower)) return 3;
+
+              const sWords = sLower.split(/\s+/).filter((w) => w.length >= 3);
+              if (sWords.length > 0) {
+                const allWordsMatch = sWords.every((w) => rom.includes(w) || eng.includes(w));
+                if (allWordsMatch) return 3.5;
+                const anyWordMatch = sWords.some((w) => rom.includes(w) || eng.includes(w));
+                if (anyWordMatch) return 2;
+              }
+              return 0;
+            };
+
+            // Eleição do nó representativo do cluster considerando título em Romaji e Inglês
+            clusterNodes.sort((a, b) => {
+              const scoreA = getNodeMatchScore(a, rawSearch);
+              const scoreB = getNodeMatchScore(b, rawSearch);
+              if (scoreA !== scoreB) return scoreB - scoreA;
 
               const tvA = a.format === 'TV' ? 1 : 0;
               const tvB = b.format === 'TV' ? 1 : 0;
@@ -718,15 +854,46 @@ export async function fetchAnimeFranchiseTree(
           }
         });
 
-        // Ordena os clusters pelo grau de relevância em relação ao termo pesquisado
-        rawClusters.sort((cA, cB) => {
-          const titleA = (cA.representative.title || '').toLowerCase().trim();
-          const titleB = (cB.representative.title || '').toLowerCase().trim();
-          const searchLower = rawSearch.toLowerCase().trim();
+        // Ordena os clusters pelo grau de relevância em relação ao termo pesquisado (Romaji + Inglês + Prioridade para targetMedia)
+        const targetId = targetMedia?.idMal || targetMedia?.id;
+        const getNodeMatchScore = (n: any, searchStr: string): number => {
+          const sLower = searchStr.toLowerCase().trim();
+          if (!sLower) return 0;
+          const rom = (n.title || '').toLowerCase().trim();
+          const eng = (n.englishTitle || '').toLowerCase().trim();
+          const nat = (n.japaneseTitle || '').toLowerCase().trim();
 
-          const exactA = titleA === searchLower ? 3 : titleA.startsWith(searchLower) ? 2 : 0;
-          const exactB = titleB === searchLower ? 3 : titleB.startsWith(searchLower) ? 2 : 0;
-          if (exactA !== exactB) return exactB - exactA;
+          if (rom === sLower || eng === sLower || nat === sLower) return 5;
+          if (rom.startsWith(sLower) || eng.startsWith(sLower)) return 4;
+          if (rom.includes(sLower) || eng.includes(sLower)) return 3;
+
+          const sWords = sLower.split(/\s+/).filter((w) => w.length >= 3);
+          if (sWords.length > 0) {
+            const allWordsMatch = sWords.every((w) => rom.includes(w) || eng.includes(w));
+            if (allWordsMatch) return 3.5;
+            const anyWordMatch = sWords.some((w) => rom.includes(w) || eng.includes(w));
+            if (anyWordMatch) return 2;
+          }
+          return 0;
+        };
+
+        rawClusters.sort((cA, cB) => {
+          // Se um cluster contém a mídia primária encontrada por targetMedia, ele tem prioridade máxima absoluta
+          if (targetId) {
+            const hasTargetA = cA.nodes.some((n) => n.id === targetId || n.aniListId === targetMedia?.id);
+            const hasTargetB = cB.nodes.some((n) => n.id === targetId || n.aniListId === targetMedia?.id);
+            if (hasTargetA !== hasTargetB) return hasTargetA ? -1 : 1;
+          }
+
+          const scoreA = Math.max(
+            getNodeMatchScore(cA.representative, rawSearch),
+            ...cA.nodes.map((n) => getNodeMatchScore(n, rawSearch))
+          );
+          const scoreB = Math.max(
+            getNodeMatchScore(cB.representative, rawSearch),
+            ...cB.nodes.map((n) => getNodeMatchScore(n, rawSearch))
+          );
+          if (scoreA !== scoreB) return scoreB - scoreA;
 
           const tvA = cA.representative.format === 'TV' ? 1 : 0;
           const tvB = cB.representative.format === 'TV' ? 1 : 0;
