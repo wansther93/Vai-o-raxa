@@ -210,7 +210,7 @@ function cleanSearchQueryVariants(raw: string): string[] {
 async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
   const graphqlQuery = `
     query ($search: String) {
-      Page(page: 1, perPage: 20) {
+      Page(page: 1, perPage: 25) {
         media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
           id
           idMal
@@ -327,7 +327,10 @@ async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
     return score;
   };
 
-  const list = [...rawList].sort((a: any, b: any) => getRelevanceScore(b) - getRelevanceScore(a));
+  // Filtra imediatamente formatos musicais para nunca ocupar vaga de animes reais
+  const list = [...rawList]
+    .filter((item: any) => (item.format || '').toUpperCase() !== 'MUSIC')
+    .sort((a: any, b: any) => getRelevanceScore(b) - getRelevanceScore(a));
 
   return list.map((item: any) => {
     // Calcular dia de exibição a partir do nextAiringEpisode estritamente se for anime em exibição ativa (RELEASING)

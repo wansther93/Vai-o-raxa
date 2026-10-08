@@ -125,7 +125,9 @@ export async function searchOfficialHighResCovers(
         return score;
       };
 
-      const list = [...rawList].sort((a: any, b: any) => getCoverScore(b) - getCoverScore(a));
+      const list = [...rawList]
+        .filter((item: any) => (item.format || '').toUpperCase() !== 'MUSIC')
+        .sort((a: any, b: any) => getCoverScore(b) - getCoverScore(a));
 
       for (const item of list) {
         const img = item.coverImage?.extraLarge || item.coverImage?.large;
