@@ -413,6 +413,11 @@ export const syncSingleAnimeMetadata = async (
 ): Promise<AnimeSyncUpdateResult> => {
   const freshData = await fetchFreshAnimeDetails(anime.title, anime.mal_id);
   if (!freshData) {
+    try {
+      await updateAnime(anime.id, { lastSyncTimestamp: new Date().toISOString() } as any);
+    } catch {
+      // Ignora erro se não conseguir atualizar timestamp
+    }
     return {
       animeId: anime.id,
       title: anime.title,
@@ -528,7 +533,7 @@ export const syncSingleAnimeMetadata = async (
 /**
  * Determina se um anime está elegível para atualização de metadados:
  * - Se 'force = true' (ex: clique manual no botão): sempre elegível.
- * - Animes ativos ('watching', 'waiting_new_episodes'): elegíveis se nunca sincronizados ou se passaram > 6h.
+ * - Animes ativos ('watching', 'waiting_new_episodes'): elegíveis se nunca sincronizados ou se passaram >= 12h.
  * - Animes de longo prazo ('completed', 'paused', 'dropped', 'cancelled', 'plan_to_watch'):
  *   Ciclo de 30 dias (720 horas) para verificar novas temporadas, sequências ou continuações canônicas.
  */
@@ -544,7 +549,7 @@ export function shouldSyncAnime(anime: Anime, force = false): boolean {
 
   const isActive = anime.status === 'watching' || anime.status === 'waiting_new_episodes';
   if (isActive) {
-    return diffHours >= 6;
+    return diffHours >= 12;
   }
 
   // Ciclo de 30 dias para animes de longo prazo
@@ -555,8 +560,8 @@ let isCollectionSyncRunning = false;
 
 /**
  * Executa a sincronização inteligente da coleção do usuário em segundo plano:
- * 1. Prioriza animes ativos em exibição (watching / waiting_new_episodes).
- * 2. Verifica animes concluídos/em pausa que atingiram o ciclo de 30 dias para descobrir surpresas/novas temporadas.
+ * 1. Prioriza animes ativos em exibição (watching / waiting_new_episodes) com intervalo de 12 horas.
+ * 2. Verifica TODOS os animes concluídos/em pausa que atingiram o ciclo de 30 dias (sem cortes ou limites artificiais).
  * 3. Utiliza AniList como motor primário com cadência segura de 750ms por obra (limite de 90 req/min).
  * 4. Utiliza Jikan e Shikimori exclusivamente como fallbacks de contingência caso a AniList não retorne dados.
  */
@@ -574,20 +579,17 @@ export const runBackgroundCollectionSync = async (
   const results: AnimeSyncUpdateResult[] = [];
 
   try {
-    // 1. Animes ativos (alta prioridade)
+    // 1. Animes ativos (alta prioridade, ciclo de 12 horas)
     const activeAnimes = animes.filter(
       (a) => a.status === 'watching' || a.status === 'waiting_new_episodes'
     );
     const activeToSync = activeAnimes.filter((a) => shouldSyncAnime(a, force));
 
-    // 2. Animes de longo prazo (ciclo de 30 dias)
+    // 2. Animes de longo prazo (ciclo de 30 dias) - Todos os elegíveis sem nenhum corte ou limite artificial
     const longTermAnimes = animes.filter(
       (a) => a.status !== 'watching' && a.status !== 'waiting_new_episodes'
     );
-    // Em execução de background automática, pega lote moderado para poupar recursos
-    const longTermToSync = longTermAnimes
-      .filter((a) => shouldSyncAnime(a, force))
-      .slice(0, force ? 12 : 6);
+    const longTermToSync = longTermAnimes.filter((a) => shouldSyncAnime(a, force));
 
     const queue = [...activeToSync, ...longTermToSync];
 
