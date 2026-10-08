@@ -6,8 +6,7 @@ import {
   ChevronDown, 
   Check, 
   Star, 
-  Search, 
-  Flame
+  Search
 } from 'lucide-react';
 import type { Anime, AnimeStatus } from '../types';
 import { STATUS_CONFIG } from '../types';
@@ -175,15 +174,8 @@ export const AnimeCompactCard = React.memo<AnimeCompactCardProps>(({
         </div>
       </div>
 
-      {/* Middle Airing Alert (if new episode aired) */}
-      <div className="relative z-10 flex-1 flex flex-col justify-center items-center px-1.5 pointer-events-none">
-        {anime.latestAiredEpisode && anime.latestAiredEpisode > anime.currentEpisode ? (
-          <div className="bg-emerald-500/90 text-slate-950 backdrop-blur-md font-black text-[8.5px] px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1 border border-emerald-300 animate-pulse pointer-events-auto">
-            <Flame className="w-2.5 h-2.5 fill-slate-950" />
-            <span>Ep. {anime.latestAiredEpisode} Saiu!</span>
-          </div>
-        ) : null}
-      </div>
+      {/* Spacer */}
+      <div className="relative z-10 flex-1 pointer-events-none" />
 
       {/* Bottom Floating Information & Episode Stepper Plate */}
       <div className="relative z-10 p-2 sm:p-2.5 bg-gradient-to-t from-[#07070a] via-[#09090e]/95 to-transparent pt-3 flex flex-col justify-end">

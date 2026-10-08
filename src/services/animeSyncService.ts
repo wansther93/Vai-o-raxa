@@ -70,6 +70,12 @@ export function extractYoutubeUrl(trailerObj: any): string | null {
 }
 
 /**
+ * Utilitário de pausa assíncrona para garantir espaçamento seguro entre requisições
+ */
+export const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
  * Consulta a API AniList GraphQL e Jikan para obter metadados frescos e status de episódios lançados
  */
 export const fetchFreshAnimeDetails = async (
@@ -199,8 +205,9 @@ export const fetchFreshAnimeDetails = async (
     console.warn('AniList fetch details error, tentando Jikan...', err);
   }
 
-  // 2. Fallback Jikan API
+  // 2. Fallback Jikan API (respeitando rate limit de no máximo 3 req/s)
   try {
+    await sleep(350);
     const url = malId
       ? `https://api.jikan.moe/v4/anime/${malId}/full`
       : `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title.trim())}&limit=1&sfw=true`;
@@ -248,7 +255,55 @@ export const fetchFreshAnimeDetails = async (
       }
     }
   } catch (err) {
-    console.warn('Jikan fetch details error:', err);
+    console.warn('Jikan fetch details error, tentando Shikimori...', err);
+  }
+
+  // 3. Fallback Shikimori API (resiliência final caso AniList e Jikan estejam fora do ar)
+  try {
+    await sleep(350);
+    const shikimoriUrl = malId
+      ? `https://shikimori.io/api/animes/${malId}`
+      : `https://shikimori.io/api/animes?search=${encodeURIComponent(title.trim())}&limit=1`;
+
+    const sRes = await fetch(shikimoriUrl, {
+      headers: { 'User-Agent': 'WAnimeList/2.0', Accept: 'application/json' },
+    });
+    if (sRes.ok) {
+      const sJson = await sRes.json();
+      const sItem = malId ? sJson : (Array.isArray(sJson) ? sJson[0] : null);
+      if (sItem && sItem.id) {
+        let cover: string | null = null;
+        if (sItem.image?.original) {
+          cover = sItem.image.original.startsWith('http')
+            ? sItem.image.original
+            : `https://shikimori.one${sItem.image.original}`;
+        }
+        const aggregated = resolveAnimeAggregatedStatus({
+          title,
+          rawApiStatus: sItem.status === 'released' ? 'Finished Airing' : sItem.status === 'ongoing' ? 'Currently Airing' : 'Not yet aired',
+          userTrackerStatus: userStatus,
+          totalEpisodes: sItem.episodes || null,
+        });
+
+        return {
+          mal_id: sItem.id,
+          totalEpisodes: sItem.episodes || null,
+          status: sItem.status === 'released' ? 'Finished Airing' : sItem.status === 'ongoing' ? 'Currently Airing' : 'Not yet aired',
+          latestAiredEpisode: sItem.status === 'released' ? sItem.episodes || null : (sItem.episodes_aired || null),
+          studio: null,
+          coverUrl: cover,
+          bannerUrl: aggregated.bannerUrl || null,
+          broadcastDay: aggregated.broadcastDay || null,
+          broadcastTime: aggregated.broadcastTime || null,
+          synopsis: sItem.description ? sItem.description.replace(/<[^>]*>/g, '').trim() : null,
+          trailerUrl: null,
+          nextEpisode: null,
+          aggregatedStatus: aggregated,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Shikimori fetch details error:', err);
   }
 
   return null;
@@ -405,8 +460,9 @@ export const syncSingleAnimeMetadata = async (
     updates.totalEpisodes = freshData.totalEpisodes;
   }
 
-  if (freshData.latestAiredEpisode) {
-    updates.latestAiredEpisode = freshData.latestAiredEpisode;
+  // Não salva latestAiredEpisode no Firebase e limpa resquícios anteriores para evitar qualquer alerta indesejado
+  if (anime.latestAiredEpisode) {
+    updates.latestAiredEpisode = null;
   }
 
   if (freshData.studio && !anime.studio) {
@@ -470,27 +526,96 @@ export const syncSingleAnimeMetadata = async (
 };
 
 /**
+ * Determina se um anime está elegível para atualização de metadados:
+ * - Se 'force = true' (ex: clique manual no botão): sempre elegível.
+ * - Animes ativos ('watching', 'waiting_new_episodes'): elegíveis se nunca sincronizados ou se passaram > 6h.
+ * - Animes de longo prazo ('completed', 'paused', 'dropped', 'cancelled', 'plan_to_watch'):
+ *   Ciclo de 30 dias (720 horas) para verificar novas temporadas, sequências ou continuações canônicas.
+ */
+export function shouldSyncAnime(anime: Anime, force = false): boolean {
+  if (force) return true;
+  if (!anime.lastSyncTimestamp) return true;
+
+  const lastSyncTime = new Date(anime.lastSyncTimestamp).getTime();
+  if (isNaN(lastSyncTime)) return true;
+
+  const now = Date.now();
+  const diffHours = (now - lastSyncTime) / (1000 * 60 * 60);
+
+  const isActive = anime.status === 'watching' || anime.status === 'waiting_new_episodes';
+  if (isActive) {
+    return diffHours >= 6;
+  }
+
+  // Ciclo de 30 dias para animes de longo prazo
+  return diffHours >= 24 * 30;
+}
+
+let isCollectionSyncRunning = false;
+
+/**
+ * Executa a sincronização inteligente da coleção do usuário em segundo plano:
+ * 1. Prioriza animes ativos em exibição (watching / waiting_new_episodes).
+ * 2. Verifica animes concluídos/em pausa que atingiram o ciclo de 30 dias para descobrir surpresas/novas temporadas.
+ * 3. Utiliza AniList como motor primário com cadência segura de 750ms por obra (limite de 90 req/min).
+ * 4. Utiliza Jikan e Shikimori exclusivamente como fallbacks de contingência caso a AniList não retorne dados.
+ */
+export const runBackgroundCollectionSync = async (
+  userId: string,
+  animes: Anime[],
+  force = false
+): Promise<AnimeSyncUpdateResult[]> => {
+  if (!userId || !animes || animes.length === 0) return [];
+  if (isCollectionSyncRunning) {
+    return [];
+  }
+
+  isCollectionSyncRunning = true;
+  const results: AnimeSyncUpdateResult[] = [];
+
+  try {
+    // 1. Animes ativos (alta prioridade)
+    const activeAnimes = animes.filter(
+      (a) => a.status === 'watching' || a.status === 'waiting_new_episodes'
+    );
+    const activeToSync = activeAnimes.filter((a) => shouldSyncAnime(a, force));
+
+    // 2. Animes de longo prazo (ciclo de 30 dias)
+    const longTermAnimes = animes.filter(
+      (a) => a.status !== 'watching' && a.status !== 'waiting_new_episodes'
+    );
+    // Em execução de background automática, pega lote moderado para poupar recursos
+    const longTermToSync = longTermAnimes
+      .filter((a) => shouldSyncAnime(a, force))
+      .slice(0, force ? 12 : 6);
+
+    const queue = [...activeToSync, ...longTermToSync];
+
+    for (const anime of queue) {
+      try {
+        const res = await syncSingleAnimeMetadata(userId, anime);
+        results.push(res);
+      } catch (e) {
+        console.warn(`[AnimeSync] Erro ao sincronizar anime ${anime.title}:`, e);
+      }
+      // Intervalo de segurança: AniList suporta 90 req/min (1 req a cada ~667ms).
+      // Usamos 750ms para garantir 100% de margem sem risco de rate limit.
+      await sleep(750);
+    }
+  } finally {
+    isCollectionSyncRunning = false;
+  }
+
+  return results;
+};
+
+/**
  * Verifica novos episódios em lote para todos os animes que o usuário está assistindo
+ * (Compatibilidade total com chamadas existentes no aplicativo)
  */
 export const checkAllAiringAnimesUpdates = async (
   userId: string,
   animes: Anime[]
 ): Promise<AnimeSyncUpdateResult[]> => {
-  const watchingOrWaiting = animes.filter(
-    (a) => a.status === 'watching' || a.status === 'waiting_new_episodes'
-  );
-
-  const results: AnimeSyncUpdateResult[] = [];
-
-  // Executa em pequenos blocos para respeitar os limites de requisição
-  for (const anime of watchingOrWaiting.slice(0, 8)) {
-    try {
-      const res = await syncSingleAnimeMetadata(userId, anime);
-      results.push(res);
-    } catch (e) {
-      console.warn(`Erro ao sincronizar anime ${anime.title}:`, e);
-    }
-  }
-
-  return results;
+  return runBackgroundCollectionSync(userId, animes, true);
 };

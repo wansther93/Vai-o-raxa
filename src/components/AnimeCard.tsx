@@ -99,11 +99,7 @@ export const AnimeCard = React.memo<AnimeCardProps>(({
         )}
 
         {/* Airing Alert */}
-        {anime.latestAiredEpisode && anime.latestAiredEpisode > anime.currentEpisode ? (
-          <div className="absolute bottom-1 inset-x-0.5 bg-emerald-500 text-slate-950 font-black text-[7.5px] px-0.5 py-0.2 rounded text-center leading-tight shadow-sm animate-pulse">
-            Ep. {anime.latestAiredEpisode}!
-          </div>
-        ) : airingToday ? (
+        {airingToday ? (
           <div className="absolute bottom-1 inset-x-0.5 bg-amber-500 text-slate-950 font-black text-[7.5px] px-0.5 py-0.2 rounded text-center leading-tight shadow-sm">
             Hoje!
           </div>

@@ -50,7 +50,7 @@ import { getRecentReviews, type CommunityReview } from './services/communityServ
 import { ImageAnimeSearchModal } from './components/ImageAnimeSearchModal';
 import { SocialCardGeneratorModal, type CardType } from './components/SocialCardGeneratorModal';
 import { calculateOtakuLevel } from './services/xpService';
-import { checkAllAiringAnimesUpdates } from './services/animeSyncService';
+import { checkAllAiringAnimesUpdates, runBackgroundCollectionSync } from './services/animeSyncService';
 import { prefetchUserCollectionMetadata, getOrFetchAnimeRichData } from './services/animeMetadataService';
 import { checkAndNotifyTodayEpisodes } from './services/notificationService';
 import {
@@ -319,16 +319,6 @@ export default function App() {
   const [deletingAnime, setDeletingAnime] = useState<Anime | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Animes with new episodes detected
-  const animesWithNewEpisodes = useMemo(() => {
-    return animes.filter(
-      (a) =>
-        (a.status === 'watching' || a.status === 'waiting_new_episodes') &&
-        typeof a.latestAiredEpisode === 'number' &&
-        a.latestAiredEpisode > a.currentEpisode
-    );
-  }, [animes]);
-
   const handleBatchSyncAiring = async () => {
     if (!user || isBatchSyncing) return;
     setIsBatchSyncing(true);
@@ -362,6 +352,16 @@ export default function App() {
       checkAndNotifyTodayEpisodes(animes);
     }
   }, [animes]);
+
+  // Sincronização automatizada em segundo plano da coleção do usuário
+  // (prioriza animes ativos e verifica periodicamente obras finalizadas no ciclo de 30 dias via AniList)
+  useEffect(() => {
+    if (!user?.uid || !animes || animes.length === 0) return;
+    const collectionSyncTimer = setTimeout(() => {
+      runBackgroundCollectionSync(user.uid, animesRef.current, false).catch(() => {});
+    }, 4500);
+    return () => clearTimeout(collectionSyncTimer);
+  }, [user?.uid, animes?.length]);
 
   // Pré-carregamento silencioso no Boot do App (executa logo após abertura em background com baixa prioridade)
   useEffect(() => {
@@ -1618,47 +1618,6 @@ export default function App() {
         {/* 6. ABA PRINCIPAL: MINHA LISTA */}
         {visitedTabs.has('list') && (
           <div className={activeTab === 'list' ? 'block space-y-4' : 'hidden'}>
-            {/* New Episodes Alert Banner (Smart Automation) */}
-            {animesWithNewEpisodes.length > 0 && (
-              <div className="bg-gradient-to-r from-cyan-950/60 via-slate-900 to-indigo-950/50 border border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shrink-0 text-cyan-300">
-                    <Bell className="w-5 h-5 animate-bounce" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-                      <span>Novos Episódios Disponíveis na Sua Lista!</span>
-                      <span className="bg-cyan-500 text-slate-950 font-black text-[10px] px-2 py-0.2 rounded-full">
-                        {animesWithNewEpisodes.length} {animesWithNewEpisodes.length === 1 ? 'anime' : 'animes'}
-                      </span>
-                    </h4>
-                    <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5 line-clamp-1">
-                      {animesWithNewEpisodes.map((a) => `${a.title} (Ep ${a.latestAiredEpisode})`).join(', ')}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentFilter('watching')}
-                    className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm"
-                  >
-                    Ver Animes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleBatchSyncAiring}
-                    disabled={isBatchSyncing}
-                    title="Sincronizar metadados dos animes em exibição"
-                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${isBatchSyncing ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Airing Today Cinematic Notice - Compacto, Elegante e Discreto */}
             {airingTodayAnimes.length > 0 && showAiringBanner && (() => {
               const featuredAnime = airingTodayAnimes[0];
