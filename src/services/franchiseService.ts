@@ -67,7 +67,7 @@ const ALLOWED_AUDIOVISUAL_FORMATS = new Set(['TV', 'MOVIE', 'OVA', 'ONA', 'SPECI
 export const franchiseTreeMemoryCache = new Map<string, any>();
 
 // Tipos de relações válidas
-const VALID_RELATION_TYPES = new Set(['SEQUEL', 'PREQUEL', 'PARENT_STORY', 'SIDE_STORY', 'SPIN_OFF', 'ALTERNATIVE_SETTING', 'ALTERNATIVE_VERSION', 'SUMMARY']);
+const VALID_RELATION_TYPES = new Set(['SEQUEL', 'PREQUEL', 'PARENT', 'PARENT_STORY', 'SIDE_STORY', 'SPIN_OFF', 'ALTERNATIVE', 'ALTERNATIVE_SETTING', 'ALTERNATIVE_VERSION', 'SUMMARY']);
 
 /**
  * Formata o título da temporada/filme de forma limpa em português a partir dos dados legítimos da API,
@@ -432,6 +432,11 @@ export async function fetchAnimeFranchiseTree(
             coverUrl: node.coverImage?.large || node.coverImage?.medium,
             relationType: relationTypeHint || 'main',
           });
+        } else if (relationTypeHint && relationTypeHint !== 'main') {
+          const existing = nodesMap.get(malId);
+          if (existing && (!existing.relationType || existing.relationType === 'main')) {
+            existing.relationType = relationTypeHint;
+          }
         }
       };
 
@@ -741,10 +746,19 @@ export async function fetchAnimeFranchiseTree(
             else if (item.format === 'ONA') mappedFormat = 'ONA';
             else if (item.format === 'SPECIAL') mappedFormat = 'Special';
 
+            const rawRel = (item.relationType || '').toLowerCase();
             let mappedRelation: FranchiseTreeItem['relationType'] = 'sequel';
-            if (idx === 0) mappedRelation = 'main';
+            if (rawRel.includes('spin_off')) mappedRelation = 'spin_off';
+            else if (rawRel.includes('side_story')) mappedRelation = 'side_story';
+            else if (rawRel.includes('alternative')) mappedRelation = 'alternative_version';
+            else if (rawRel.includes('summary')) mappedRelation = 'summary';
+            else if (rawRel.includes('parent')) mappedRelation = 'parent';
+            else if (rawRel.includes('prequel')) mappedRelation = 'prequel';
+            else if (rawRel.includes('sequel')) mappedRelation = 'sequel';
+            else if (idx === 0) mappedRelation = 'main';
             else if (mappedFormat === 'Movie') mappedRelation = 'movie';
             else if (mappedFormat === 'OVA') mappedRelation = 'ova';
+            else mappedRelation = (rawRel as any) || 'sequel';
 
             return {
               id: item.id,

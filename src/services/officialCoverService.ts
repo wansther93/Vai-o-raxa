@@ -24,13 +24,16 @@ const coversCache = new Map<string, OfficialCoverItem[]>();
 
 /**
  * Busca capas oficiais em altíssima resolução de todas as mídias da franquia
- * (temporadas, filmes, OVAs, especiais) através das APIs AniList e Jikan.
+ * (temporadas, filmes, OVAs, especiais) através da API AniList como primária.
  * 
- * Regra de Ouro: AniList é o motor primário ultrarrápido (retorna em 300-500ms).
- * O Jikan roda apenas como complemento/fallback e com timeout estrito de 2s para NUNCA travar a tela.
+ * Regra de Ouro:
+ * 1. AniList (GraphQL) é o motor primário ultrarrápido (200-400ms).
+ * 2. Jikan (MyAnimeList) roda ESTRITAMENTE como contingência se e somente se a AniList falhar ou vier vazia.
+ * 3. NUNCA dispara chamadas paralelas ao Jikan para não estressar a taxa de 3 req/s.
  */
 export async function searchOfficialHighResCovers(
-  query: string
+  query: string,
+  signal?: AbortSignal
 ): Promise<OfficialCoverItem[]> {
   const cleanQuery = query.trim();
   if (!cleanQuery || cleanQuery.length < 2) {
@@ -44,120 +47,129 @@ export async function searchOfficialHighResCovers(
 
   const coversMap = new Map<string, OfficialCoverItem>();
 
-  // 1. Busca Primária via AniList GraphQL (extraLarge - máxima resolução, 1000px+)
-  const anilistPromise = (async () => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+  // 1. Busca Primária Exclusiva via AniList GraphQL (extraLarge - máxima resolução, 1000px+)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-      const graphqlQuery = `
-        query ($search: String) {
-          Page(page: 1, perPage: 25) {
-            media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
-              id
-              title {
-                romaji
-                english
-                native
-              }
-              format
-              seasonYear
-              startDate {
-                year
-              }
-              coverImage {
-                extraLarge
-                large
-              }
+    const onParentAbort = () => controller.abort();
+    if (signal) {
+      signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    const graphqlQuery = `
+      query ($search: String) {
+        Page(page: 1, perPage: 25) {
+          media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+            id
+            title {
+              romaji
+              english
+              native
+            }
+            format
+            seasonYear
+            startDate {
+              year
+            }
+            coverImage {
+              extraLarge
+              large
             }
           }
         }
-      `;
+      }
+    `;
 
-      const res = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          query: graphqlQuery,
-          variables: { search: cleanQuery },
-        }),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeoutId));
+    const res = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        query: graphqlQuery,
+        variables: { search: cleanQuery },
+      }),
+      signal: controller.signal,
+    }).finally(() => {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onParentAbort);
+    });
 
-      if (res.ok) {
-        const json = await res.json();
-        const list = json?.data?.Page?.media || [];
+    if (res.ok) {
+      const json = await res.json();
+      const list = json?.data?.Page?.media || [];
 
-        for (const item of list) {
-          const img = item.coverImage?.extraLarge || item.coverImage?.large;
-          if (img && !coversMap.has(img)) {
-            const title = item.title?.english || item.title?.romaji || item.title?.native || cleanQuery;
-            const year = item.seasonYear || item.startDate?.year;
-            coversMap.set(img, {
-              id: `anilist_${item.id}`,
-              title,
-              imageUrl: img,
-              year: year || undefined,
-              format: item.format || 'TV',
-              source: 'AniList HD',
-            });
-          }
+      for (const item of list) {
+        const img = item.coverImage?.extraLarge || item.coverImage?.large;
+        if (img && !coversMap.has(img)) {
+          const title = item.title?.english || item.title?.romaji || item.title?.native || cleanQuery;
+          const year = item.seasonYear || item.startDate?.year;
+          coversMap.set(img, {
+            id: `anilist_${item.id}`,
+            title,
+            imageUrl: img,
+            year: year || undefined,
+            format: item.format || 'TV',
+            source: 'AniList HD',
+          });
         }
       }
-    } catch (err) {
-      console.warn('Erro ao buscar capas HD na AniList:', err);
     }
-  })();
+  } catch (err) {
+    if (signal?.aborted) return [];
+    console.warn('AniList capas indisponível, acionando fallback Jikan...', err);
+  }
 
-  // 2. Busca Complementar via Jikan (MyAnimeList WebP Large) com timeout estrito de 2s
-  const jikanPromise = (async () => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
+  // 2. Se a AniList já encontrou capas com sucesso, RETORNA IMEDIATAMENTE (zero chamadas secundárias)
+  if (coversMap.size > 0) {
+    const result = Array.from(coversMap.values());
+    coversCache.set(cacheKey, result);
+    return result;
+  }
 
-      const url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(cleanQuery)}&limit=15&sfw=true`;
-      const res = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeoutId));
-      if (res.ok) {
-        const json = await res.json();
-        const list = json?.data || [];
+  // 3. Fallback estrito via Jikan (SOMENTE se AniList falhou ou retornou 0 capas)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-        for (const item of list) {
-          const img =
-            item.images?.webp?.large_image_url ||
-            item.images?.jpg?.large_image_url;
-          if (img && !coversMap.has(img)) {
-            const title = item.title_english || item.title || cleanQuery;
-            const year = item.year || item.aired?.prop?.from?.year;
-            coversMap.set(img, {
-              id: `jikan_${item.mal_id}`,
-              title,
-              imageUrl: img,
-              year: year || undefined,
-              format: item.type || 'TV',
-              source: 'MyAnimeList HD',
-            });
-          }
+    const onParentAbort = () => controller.abort();
+    if (signal) {
+      signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    const url = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(cleanQuery)}&limit=12&sfw=true`;
+    const res = await fetch(url, { signal: controller.signal }).finally(() => {
+      clearTimeout(timeoutId);
+      if (signal) signal.removeEventListener('abort', onParentAbort);
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      const list = json?.data || [];
+
+      for (const item of list) {
+        const img =
+          item.images?.webp?.large_image_url ||
+          item.images?.jpg?.large_image_url;
+        if (img && !coversMap.has(img)) {
+          const title = item.title_english || item.title || cleanQuery;
+          const year = item.year || item.aired?.prop?.from?.year;
+          coversMap.set(img, {
+            id: `jikan_${item.mal_id}`,
+            title,
+            imageUrl: img,
+            year: year || undefined,
+            format: item.type || 'TV',
+            source: 'MyAnimeList HD',
+          });
         }
       }
-    } catch {
-      // Jikan falhou ou expirou timeout - ignorado com segurança pois AniList é o motor primário
     }
-  })();
-
-  // Se AniList responder rápido com resultados, não espera Jikan travar
-  await anilistPromise;
-  if (coversMap.size === 0) {
-    // Se AniList não retornou nada, aguarda Jikan com o timeout de 2s
-    await jikanPromise;
-  } else {
-    // Se AniList já encontrou capas, aguarda Jikan no máximo 600ms a mais ou prossegue
-    await Promise.race([
-      jikanPromise,
-      new Promise((resolve) => setTimeout(resolve, 600)),
-    ]);
+  } catch (err) {
+    if (signal?.aborted) return [];
+    console.warn('Fallback Jikan capas também falhou:', err);
   }
 
   const result = Array.from(coversMap.values());

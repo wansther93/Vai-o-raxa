@@ -153,21 +153,14 @@ export const fetchFreshAnimeDetails = async (
         let trailerUrl: string | null = null;
         if (media.trailer?.site === 'youtube' && media.trailer?.id) {
           trailerUrl = `https://www.youtube.com/watch?v=${media.trailer.id}`;
-        } else {
-          // AniList muitas vezes não possui trailer no nó mãe (ex: One Piece), busca no Jikan Full / Search
-          try {
-            const malLookupId = media.idMal;
-            const jikanUrl = malLookupId
-              ? `https://api.jikan.moe/v4/anime/${malLookupId}/full`
-              : `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(title.trim())}&limit=1&sfw=true`;
-            const jRes = await fetch(jikanUrl);
-            if (jRes.ok) {
-              const jJson = await jRes.json();
-              const jItem = malLookupId ? jJson.data : jJson.data?.[0];
-              trailerUrl = extractYoutubeUrl(jItem?.trailer);
+        } else if (Array.isArray(media.relations?.edges)) {
+          // Busca trailer nas relações canônicas da própria AniList (zero chamadas extras)
+          for (const edge of media.relations.edges) {
+            const relNode = edge?.node;
+            if (relNode?.trailer?.site === 'youtube' && relNode?.trailer?.id) {
+              trailerUrl = `https://www.youtube.com/watch?v=${relNode.trailer.id}`;
+              break;
             }
-          } catch {
-            // Silencioso
           }
         }
 

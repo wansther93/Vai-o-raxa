@@ -107,7 +107,7 @@ export interface FranchiseTreeItem {
   episodes: number | null;
   seasonYear?: number | null;
   coverUrl?: string;
-  relationType: 'sequel' | 'prequel' | 'side_story' | 'movie' | 'ova' | 'spin_off' | 'parent' | 'main' | 'arc';
+  relationType: 'sequel' | 'prequel' | 'side_story' | 'movie' | 'ova' | 'spin_off' | 'parent' | 'main' | 'arc' | 'alternative' | 'alternative_version' | 'summary' | 'other';
   order: number;
   isWatched?: boolean;
   isCurrent?: boolean;

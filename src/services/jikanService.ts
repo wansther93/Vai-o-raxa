@@ -243,8 +243,27 @@ async function searchAniList(query: string): Promise<JikanAnimeResult[]> {
   }
 
   const json = await res.json();
-  const list = json?.data?.Page?.media;
-  if (!Array.isArray(list) || list.length === 0) return [];
+  const rawList = json?.data?.Page?.media;
+  if (!Array.isArray(rawList) || rawList.length === 0) return [];
+
+  const qLower = query.toLowerCase().trim();
+  const list = [...rawList].sort((a: any, b: any) => {
+    const aRomaji = (a.title?.romaji || '').toLowerCase().trim();
+    const aEng = (a.title?.english || '').toLowerCase().trim();
+    const aExact = aRomaji === qLower || aEng === qLower ? 1 : 0;
+
+    const bRomaji = (b.title?.romaji || '').toLowerCase().trim();
+    const bEng = (b.title?.english || '').toLowerCase().trim();
+    const bExact = bRomaji === qLower || bEng === qLower ? 1 : 0;
+
+    if (aExact !== bExact) return bExact - aExact;
+
+    const aStarts = aRomaji.startsWith(qLower) || aEng.startsWith(qLower) ? 1 : 0;
+    const bStarts = bRomaji.startsWith(qLower) || bEng.startsWith(qLower) ? 1 : 0;
+    if (aStarts !== bStarts) return bStarts - aStarts;
+
+    return 0;
+  });
 
   return list.map((item: any) => {
     // Calcular dia de exibição a partir do nextAiringEpisode estritamente se for anime em exibição ativa (RELEASING)

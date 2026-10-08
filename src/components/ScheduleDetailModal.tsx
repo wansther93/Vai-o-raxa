@@ -136,7 +136,7 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
     setBannerUrl(anime.bannerUrl || null);
 
     // 1. APROVEITAMENTO IMEDIATO DE TODOS OS DADOS DO LOTE (0ms):
-    // Preenche status, episódios, estúdio, dia e horários que já vieram da listagem em lote
+    // Preenche status, episódios, estúdio, dia, horários, trailer e banner que já vieram no lote
     setLiveDetails({
       status: anime.status,
       totalEpisodes: anime.episodes,
@@ -150,33 +150,13 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
     // 2. Extrai instantaneamente plataformas oficiais de streaming já presentes nos externalLinks do lote (0ms)
     const batchStreams = extractBatchStreamingLinks((anime as any).externalLinks);
     setStreamingLinks(batchStreams);
-    // Nunca trava nem exibe spinner obstrutivo: a informação já veio no lote
     setLoadingStreaming(false);
 
-    setLoadingNews(true);
+    setLoadingNews(false);
 
     const malId = anime.idMal || anime.id;
 
-    // Sincroniza metadados oficiais automaticamente em segundo plano para captar novidades frescas
-    fetchFreshAnimeDetails(anime.title, malId)
-      .then((data) => {
-        if (!isMounted || !data) return;
-        setLiveDetails((prev) => ({
-          ...prev,
-          ...data,
-        }));
-        if (data.bannerUrl) {
-          setBannerUrl(data.bannerUrl);
-          if (existingUserAnime && !existingUserAnime.bannerUrl && existingUserAnime.id) {
-            updateAnime(existingUserAnime.id, { bannerUrl: data.bannerUrl }).catch(() => {});
-          }
-        }
-      })
-      .catch((err) => {
-        console.warn('Erro ao carregar detalhes frescos do anime:', err);
-      });
-
-    // Se anime não possuir banner próprio (comum em temporadas futuras), busca banner da franquia/temporada anterior
+    // Se anime não possuir banner próprio nem no lote, busca banner da franquia de forma passiva
     if (!anime.bannerUrl) {
       getAnimeBanner(malId, anime.title).then((foundBanner) => {
         if (isMounted && foundBanner) {
@@ -185,33 +165,26 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
             updateAnime(existingUserAnime.id, { bannerUrl: foundBanner }).catch(() => {});
           }
         }
-      });
+      }).catch(() => {});
     }
 
-    // Busca streaming oficial no Brasil com cascata multi-API (AniList + Jikan + Shikimori)
-    // Se já tiver vindo no lote, apenas complementa/atualiza sem bloquear a tela
-    getAggregatedStreamingLinks(malId, anime.title)
-      .then((links) => {
-        if (isMounted) {
-          const sanitized = links.filter(
-            (l) => !l.name.toLowerCase().includes('youtube') && !l.url.toLowerCase().includes('youtube')
-          );
-          if (sanitized.length > 0) {
-            setStreamingLinks((prev) => {
-              const map = new Map<string, AnimeStreamingLink>();
-              prev.forEach((p) => map.set(p.name, p));
-              sanitized.forEach((s) => map.set(s.name, s));
-              return Array.from(map.values());
-            });
+    // Busca streaming complementar SOMENTE se o lote não trouxe nenhum link oficial
+    if (batchStreams.length === 0) {
+      getAggregatedStreamingLinks(malId, anime.title)
+        .then((links) => {
+          if (isMounted && Array.isArray(links)) {
+            const sanitized = links.filter(
+              (l) => !l.name.toLowerCase().includes('youtube') && !l.url.toLowerCase().includes('youtube')
+            );
+            if (sanitized.length > 0) {
+              setStreamingLinks(sanitized);
+            }
           }
-          setLoadingStreaming(false);
-        }
-      })
-      .catch(() => {
-        if (isMounted) setLoadingStreaming(false);
-      });
+        })
+        .catch(() => {});
+    }
 
-    // Busca notícias específicas desta obra com multicamadas
+    // Busca notícias específicas desta obra em segundo plano sem travar a interface
     fetchAnimeSpecificNews(malId, anime.title, userAnimes, {
       englishTitle: anime.title_english,
       japaneseTitle: anime.title_japanese,
@@ -220,14 +193,11 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
       bannerUrl: anime.bannerUrl,
     })
       .then((newsItems) => {
-        if (isMounted) {
+        if (isMounted && Array.isArray(newsItems) && newsItems.length > 0) {
           setNews(newsItems);
-          setLoadingNews(false);
         }
       })
-      .catch(() => {
-        if (isMounted) setLoadingNews(false);
-      });
+      .catch(() => {});
 
     return () => {
       isMounted = false;
@@ -525,10 +495,22 @@ export const ScheduleDetailModal: React.FC<ScheduleDetailModalProps> = ({
                     {anime.studio}
                   </span>
                 )}
+                {existingUserAnime && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-xs">
+                    <CheckCircle2 className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span>Na sua lista{existingUserAnime.title.toLowerCase() !== anime.title.toLowerCase() ? `: ${existingUserAnime.title}` : ''}</span>
+                  </span>
+                )}
               </div>
               <h2 className="text-base sm:text-xl md:text-2xl font-black text-white leading-tight line-clamp-2 drop-shadow-md">
                 {anime.title}
               </h2>
+              {existingUserAnime && existingUserAnime.title.toLowerCase() !== anime.title.toLowerCase() && (
+                <div className="mt-1 flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-amber-300/95 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 w-fit">
+                  <span className="text-amber-400 font-bold">Salvo na sua lista:</span>
+                  <span className="text-white font-extrabold">{existingUserAnime.title}</span>
+                </div>
+              )}
               {anime.title_japanese && (
                 <p className="text-xs text-zinc-400 truncate mt-0.5 font-sans opacity-80">
                   {anime.title_japanese}

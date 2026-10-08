@@ -28,7 +28,8 @@ import {
   Square,
   MapPin,
   Clapperboard,
-  Lightbulb
+  Lightbulb,
+  Star
 } from 'lucide-react';
 import type { AnimeSeasonOrArc, FranchiseTreeItem, FranchiseCandidate } from '../types';
 import { 
@@ -106,36 +107,60 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
   const [formatFilter, setFormatFilter] = useState<'tv' | 'movie' | 'special'>('tv');
   const [includedItemIds, setIncludedItemIds] = useState<(string | number)[]>([]);
 
-  // Contadores dinâmicos por formato/categoria
-  const totalCount = franchiseItems.length;
-  const tvCount = franchiseItems.filter((it) => !it.format || it.format === 'TV').length;
-  const movieCount = franchiseItems.filter(
-    (it) => it.format === 'Movie' || /filme|movie/i.test(it.title) || /filme|movie/i.test(it.englishTitle || '')
-  ).length;
-  const specialCount = franchiseItems.filter(
-    (it) =>
-      it.format === 'OVA' ||
-      it.format === 'Special' ||
-      it.format === 'ONA' ||
-      /ova|special|especial/i.test(it.title) ||
-      /ova|special|especial/i.test(it.englishTitle || '')
-  ).length;
+  // Funções de classificação canônica e de formato baseadas nos metadados oficiais da API:
+  const isMainSeriesTreeItem = (it: FranchiseTreeItem): boolean => {
+    const format = (it.format || 'TV').toUpperCase();
+    const rel = (it.relationType || '').toLowerCase();
 
-  // Itens filtrados para visualização nas abas de formato (TV, Filmes, Especiais & OVAs)
+    // Filmes, OVAs e Especiais tradicionais não pertencem à aba de Séries & Temporadas principais
+    if (format === 'MOVIE' || format === 'OVA' || format === 'SPECIAL') {
+      return false;
+    }
+
+    // Obras derivadas, spin-offs, versões alternativas/reedições ou resumos pertencem a Especiais
+    if (
+      rel === 'spin_off' ||
+      rel === 'side_story' ||
+      rel === 'alternative' ||
+      rel === 'alternative_version' ||
+      rel === 'summary'
+    ) {
+      return false;
+    }
+
+    // Séries de TV e ONAs (streaming oficial como JoJo Stone Ocean) que sejam a série principal ou continuações canônicas
+    if (format === 'TV' || format === 'ONA') {
+      return rel === 'main' || rel === 'sequel' || rel === 'prequel' || rel === 'parent' || !rel;
+    }
+
+    return false;
+  };
+
+  const isMovieTreeItem = (it: FranchiseTreeItem): boolean => {
+    const format = (it.format || '').toUpperCase();
+    return format === 'MOVIE' || /filme|movie/i.test(it.title) || /filme|movie/i.test(it.englishTitle || '');
+  };
+
+  const isSpecialOrExtraTreeItem = (it: FranchiseTreeItem): boolean => {
+    return !isMainSeriesTreeItem(it) && !isMovieTreeItem(it);
+  };
+
+  const isCanonMovieItem = (it: FranchiseTreeItem): boolean => {
+    const rel = (it.relationType || '').toLowerCase();
+    return rel === 'sequel' || rel === 'prequel';
+  };
+
+  // Contadores dinâmicos por formato/categoria com isolamento de spin-offs
+  const totalCount = franchiseItems.length;
+  const mainSeriesCount = franchiseItems.filter(isMainSeriesTreeItem).length;
+  const movieCount = franchiseItems.filter(isMovieTreeItem).length;
+  const specialCount = franchiseItems.filter(isSpecialOrExtraTreeItem).length;
+
+  // Itens filtrados para visualização nas 3 abas oficiais (Séries & Temporadas, Filmes, Especiais & OVAs)
   const displayedFranchiseItems = franchiseItems.filter((it) => {
-    if (formatFilter === 'tv') return !it.format || it.format === 'TV';
-    if (formatFilter === 'movie') {
-      return it.format === 'Movie' || /filme|movie/i.test(it.title) || /filme|movie/i.test(it.englishTitle || '');
-    }
-    if (formatFilter === 'special') {
-      return (
-        it.format === 'OVA' ||
-        it.format === 'Special' ||
-        it.format === 'ONA' ||
-        /ova|special|especial/i.test(it.title) ||
-        /ova|special|especial/i.test(it.englishTitle || '')
-      );
-    }
+    if (formatFilter === 'tv') return isMainSeriesTreeItem(it);
+    if (formatFilter === 'movie') return isMovieTreeItem(it);
+    if (formatFilter === 'special') return isSpecialOrExtraTreeItem(it);
     return true;
   });
 
@@ -215,6 +240,15 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
         setIsDisambiguationModalOpen(false);
       }
 
+      // Ajusta aba ativa para Filmes se a obra não possuir séries de TV/ONA
+      const hasMain = rawItems.some(isMainSeriesTreeItem);
+      const hasMovies = rawItems.some(isMovieTreeItem);
+      if (!hasMain && hasMovies) {
+        setFormatFilter('movie');
+      } else {
+        setFormatFilter('tv');
+      }
+
       // Regra de Ouro: NUNCA pré-seleciona nada automaticamente. O usuário escolhe livremente o que deseja incluir.
       setIncludedItemIds([]);
       // Não trava nem força a primeira temporada como assistida!
@@ -237,6 +271,13 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
     setFranchiseItems(cand.items);
 
     // Começa sempre sem nada selecionado para que o usuário escolha os itens
+    const hasMain = cand.items.some(isMainSeriesTreeItem);
+    const hasMovies = cand.items.some(isMovieTreeItem);
+    if (!hasMain && hasMovies) {
+      setFormatFilter('movie');
+    } else {
+      setFormatFilter('tv');
+    }
     setIncludedItemIds([]);
     setSelectedItemId('');
 
@@ -434,7 +475,7 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
                 }`}
               >
                 <Tv className="w-3 h-3 text-indigo-400" />
-                <span>Séries TV ({tvCount})</span>
+                <span>Séries & Temporadas ({mainSeriesCount})</span>
               </button>
 
               {movieCount > 0 && (
@@ -515,14 +556,14 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
                 const isOva = item.format === 'OVA';
                 const isSpecial = item.format === 'Special' || item.format === 'ONA';
 
-                // Determina se este item é uma temporada de TV anterior à ativa
+                // Determina se este item é uma temporada de TV ou série anterior à ativa
                 const activeItemIdx = franchiseItems.findIndex((it) => String(it.id) === String(selectedItemId));
                 const currentItemIdx = franchiseItems.findIndex((it) => String(it.id) === String(item.id));
                 const isPriorTvSeason =
                   autoMarkPrevious &&
                   activeItemIdx !== -1 &&
                   currentItemIdx < activeItemIdx &&
-                  (!item.format || item.format === 'TV');
+                  isMainSeriesTreeItem(item);
 
                 return (
                   <div
@@ -578,18 +619,45 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
                         </p>
 
                         <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px] text-zinc-400">
-                          {/* Badge de Formato */}
-                          <span
-                            className={`px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border ${
-                              isMovie
-                                ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
-                                : isOva || isSpecial
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-                            }`}
-                          >
-                            {item.format || 'TV'}
-                          </span>
+                          {/* Badge de Formato e Classificação Canônica */}
+                          {isMovie ? (
+                            isCanonMovieItem(item) ? (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-amber-500/20 text-amber-300 border-amber-500/40 flex items-center gap-1 shadow-xs">
+                                <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
+                                <span>Canônico</span>
+                              </span>
+                            ) : item.relationType === 'summary' ? (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-zinc-500/20 text-zinc-300 border-zinc-500/40">
+                                Filme Resumo
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-purple-500/20 text-purple-300 border-purple-500/40">
+                                Filme
+                              </span>
+                            )
+                          ) : formatFilter === 'special' ? (
+                            item.relationType === 'spin_off' ? (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-rose-500/20 text-rose-300 border-rose-500/40">
+                                Spin-off
+                              </span>
+                            ) : item.relationType === 'alternative' || item.relationType === 'alternative_version' ? (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-cyan-500/20 text-cyan-300 border-cyan-500/40">
+                                Versão Alternativa
+                              </span>
+                            ) : item.relationType === 'summary' ? (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-zinc-500/20 text-zinc-300 border-zinc-500/40">
+                                Recapitulação
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                                {item.format || 'Especial'}
+                              </span>
+                            )
+                          ) : (
+                            <span className="px-1.5 py-0.2 rounded font-bold uppercase tracking-wider text-[9px] border bg-indigo-500/20 text-indigo-300 border-indigo-500/40">
+                              {item.format || 'TV'}
+                            </span>
+                          )}
 
                           {item.episodes ? (
                             <span className="font-medium text-zinc-300">{item.episodes} eps</span>
@@ -661,7 +729,7 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
                 onChange={(e) => setAutoMarkPrevious(e.target.checked)}
                 className="w-4 h-4 rounded border-white/20 bg-black text-indigo-600 focus:ring-0 cursor-pointer"
               />
-              <span>Marcar temporadas de TV anteriores como assistidas</span>
+              <span>Marcar temporadas anteriores como assistidas</span>
             </label>
 
             <div className="flex items-center gap-2 ml-auto">

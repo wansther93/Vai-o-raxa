@@ -204,23 +204,27 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
     setError(null);
   }, [initialData, isOpen]);
 
-  // Pré-carregamento Inteligente em Segundo Plano:
+  // Pré-carregamento e Sincronização Automática ao Digitar:
   // Enquanto o usuário digita (O, N, E...), o timer zera a cada tecla (ZERO requisições às APIs).
-  // Quando o usuário termina de digitar (passou 700ms sem teclar e tem >= 3 letras),
-  // o sistema consulta silenciosamente a árvore de franquias e capas em background e guarda em memória.
-  // Ao clicar no botão, os dados já estão no cache e abrem em 0ms instantâneo!
+  // Quando o usuário termina de digitar (passou 700ms sem teclar e tem >= 2 letras):
+  // 1. Consulta silenciosamente a árvore de franquias oficial na AniList
+  // 2. Pré-carrega capas em alta resolução
+  // 3. Preenche automaticamente metadados essenciais (estúdio, ano, trailer) se for novo cadastro
   useEffect(() => {
     if (!isOpen) return;
     const clean = title.trim();
-    if (clean.length < 3) return;
+    if (clean.length < 2) return;
 
     const timer = setTimeout(() => {
       fetchAnimeFranchiseTree(clean).catch(() => {});
       searchOfficialHighResCovers(clean).catch(() => {});
+      if (!initialData && !originalTitle) {
+        handleAutoFetchMetadata(clean);
+      }
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [title, isOpen]);
+  }, [title, isOpen, initialData, originalTitle]);
 
   if (!isOpen) return null;
 
